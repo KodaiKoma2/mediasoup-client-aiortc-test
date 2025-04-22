@@ -7,6 +7,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Store active producers
+const producers = new Map();
+
 const init = async () => {
     const worker = await createWorker({
         logLevel: 'warn',
@@ -49,7 +52,7 @@ const init = async () => {
             } else if (data.event === 'createProducerTransport') {
                 try {
                     const transport = await router.createWebRtcTransport({
-                        listenIps: [{ ip: '0.0.0.0', announcedIp: null }], // Replace with your public IP if needed
+                        listenIps: [{ ip: '0.0.0.0', announcedIp: null }],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
@@ -86,10 +89,12 @@ const init = async () => {
                                     kind: transportData.transportData.kind, 
                                     rtpParameters: transportData.transportData.rtpParameters, 
                                     appData: transportData.transportData.appData
-                                })
-                                ws.send(JSON.stringify({ event: 'produced', id: producer.id }))
+                                });
+                                // Store the producer
+                                producers.set(producer.id, producer);
+                                ws.send(JSON.stringify({ event: 'produced', id: producer.id }));
                             } catch (error) {
-                                console.log("Error producing: ", error)
+                                console.log("Error producing: ", error);
                             }
                         }
                     });
@@ -97,11 +102,84 @@ const init = async () => {
                     console.error('Error creating transport:', error);
                     ws.send(JSON.stringify({ event: 'createTransport', error: error.message }));
                 }
+            } else if (data.event === 'createConsumerTransport') {
+                try {
+                    const transport = await router.createWebRtcTransport({
+                        listenIps: [{ ip: '0.0.0.0', announcedIp: null }],
+                        enableUdp: true,
+                        enableTcp: true,
+                        preferUdp: true,
+                    });
+
+                    console.log('Consumer transport created:', transport.id);
+
+                    ws.send(JSON.stringify({
+                        event: 'consumerTransportCreated',
+                        transport: {
+                            id: transport.id,
+                            iceParameters: transport.iceParameters,
+                            iceCandidates: transport.iceCandidates,
+                            dtlsParameters: transport.dtlsParameters,
+                        }
+                    }));
+
+                    // Handle DTLS parameters from the client
+                    ws.on('message', async (message) => {
+                        const transportData = JSON.parse(message);
+                        if (transportData.event === 'connectConsumerTransport') {
+                            try {
+                                await transport.connect({ dtlsParameters: transportData.dtlsParameters });
+                                console.log('Consumer transport connected:', transport.id);
+                                ws.send(JSON.stringify({ event: 'consumerTransportConnected', status: 'connected' }));
+                            } catch (error) {
+                                console.error('Error connecting consumer transport:', error);
+                                ws.send(JSON.stringify({ event: 'consumerTransportConnected', error: error.message }));
+                            }
+                        } else if (transportData.event === 'consume') {
+                            try {
+                                // Get the first available producer
+                                const producerIds = Array.from(producers.keys());
+                                if (producerIds.length === 0) {
+                                    throw new Error('No producers available');
+                                }
+                                const producerId = producerIds[0];
+                                const producer = producers.get(producerId);
+
+                                const consumer = await transport.consume({
+                                    producerId: producer.id,
+                                    rtpCapabilities: transportData.rtpCapabilities,
+                                });
+
+                                ws.send(JSON.stringify({
+                                    event: 'consumed',
+                                    consumer: {
+                                        id: consumer.id,
+                                        producerId: producer.id,
+                                        kind: consumer.kind,
+                                        rtpParameters: consumer.rtpParameters,
+                                    }
+                                }));
+                            } catch (error) {
+                                console.error('Error consuming:', error);
+                                ws.send(JSON.stringify({ event: 'consumed', error: error.message }));
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error creating consumer transport:', error);
+                    ws.send(JSON.stringify({ event: 'createConsumerTransport', error: error.message }));
+                }
             }
         });
 
         ws.on('close', () => {
             console.log('Client disconnected');
+            // Clean up producers when client disconnects
+            producers.forEach((producer, id) => {
+                if (producer.closed) {
+                    producers.delete(id);
+                }
+            });
         });
     });
 };

@@ -13,7 +13,8 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
+            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
+            file: 'mov_hts-samp009.mp4',
         },
     });
 
