@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "typescript:build",
+			"path": "mediasoup-client-aiortc",
+			"group": "build",
+			"problemMatcher": [],
+			"label": "npm: debug - mediasoup-client-aiortc",
+			"detail": "node --inspect -r ts-node/register server/server.ts"
+		}
+	]
+}

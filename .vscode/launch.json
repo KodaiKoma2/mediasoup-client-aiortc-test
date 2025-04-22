@@ -1,0 +1,43 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Producer",
+            "type": "node",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/mediasoup-client-aiortc",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "start"
+            ],
+        },
+        {
+            "name": "Launch SFU Server",
+            "type": "node",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/mediasoup_sfu",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "start"
+            ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug Server",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/mediasoup-client-aiortc/src/index.ts",
+            "preLaunchTask": "npm: debug - mediasoup-client-aiortc",
+            "outFiles": [
+                "${workspaceFolder}/mediasoup-client-aiortc/**/*.js"
+            ],
+            "sourceMaps": true,
+            "smartStep": true,
+            "internalConsoleOptions": "openOnSessionStart"
+        }
+    ]
+} 
