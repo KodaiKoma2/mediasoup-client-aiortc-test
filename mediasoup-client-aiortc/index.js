@@ -13,8 +13,8 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
-            file: 'mov_hts-samp009.mp4',
+            file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
+            // file: 'mov_hts-samp009.mp4',
         },
     });
 
@@ -59,14 +59,14 @@ async function main() {
             if (data.error) {
                 console.error('Error creating transport:', data.error);
             } else {
-                console.log('Transport created:', data.transport);
+                console.log('Transport created:', data.producerTransport);
 
                 // create the transport
                 const transport = device.createSendTransport({
-                    id: data.transport.id,
-                    iceParameters: data.transport.iceParameters,
-                    iceCandidates: data.transport.iceCandidates,
-                    dtlsParameters: data.transport.dtlsParameters,
+                    id: data.producerTransport.id,
+                    iceParameters: data.producerTransport.iceParameters,
+                    iceCandidates: data.producerTransport.iceCandidates,
+                    dtlsParameters: data.producerTransport.dtlsParameters,
                 });
 
                 transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
@@ -94,7 +94,7 @@ async function main() {
                     // };
                 });
                 transport.on('produce', async ({ kind, rtpParameters, appData }, callback, errback) => {
-                    console.log('Transport produce event:', kind, rtpParameters);
+                    console.log('Transport produce event:', kind, rtpParameters.codecs);
 
                     // Send the produce request to the SFU server
                     ws.send(JSON.stringify({
@@ -119,6 +119,10 @@ async function main() {
                             }
                         }
                     };
+                });
+
+                transport.on('connectionstatechange', (state) => {
+                    console.log('!!!! Transport connection state:', state);
                 });
 
                 await transport.produce({ track: videoTrack })

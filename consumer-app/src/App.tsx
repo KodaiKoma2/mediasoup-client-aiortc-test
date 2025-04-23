@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Device } from 'mediasoup-client';
+import { Device, types } from 'mediasoup-client';
 import './App.css';
 
 interface DtlsParameters {
-  // Add the actual properties of dtlsParameters here
   [key: string]: any;
 }
 
@@ -11,20 +10,29 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const deviceRef = useRef<Device | null>(null);
   const consumerRef = useRef<any>(null);
-  const transportRef = useRef<any>(null);
+  const transportRef = useRef<types.Transport | undefined>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const handleConsume = async () => {
+    if (wsRef.current && transportRef.current && deviceRef.current) {
+      console.log('Sending consume request');
+      wsRef.current.send(
+        JSON.stringify({
+          event: 'consume',
+          transportId: transportRef.current.id,
+          rtpCapabilities: deviceRef.current.rtpCapabilities,
+        })
+      );
+    }
+  };
 
   useEffect(() => {
     const initialize = async () => {
-      // Create a new mediasoup device
       deviceRef.current = new Device();
-
-      // Connect to the SFU server using WebSocket
       wsRef.current = new WebSocket('ws://localhost:3000');
 
       wsRef.current.onopen = () => {
         console.log('WebSocket connection established');
-        // Request RTP Capabilities from the SFU server
         wsRef.current?.send(JSON.stringify({ event: 'getRtpCapabilities' }));
       };
 
@@ -36,11 +44,10 @@ function App() {
           if (data.error) {
             console.error('Error getting RTP Capabilities:', data.error);
           } else {
-            console.log('RTP Capabilities received from SFU');
+            console.log('RTP Capabilities received from SFU', data.rtpCapabilities);
             try {
               await deviceRef.current?.load({ routerRtpCapabilities: data.rtpCapabilities });
               console.log('Device loaded successfully');
-              // Create a consumer transport
               wsRef.current?.send(JSON.stringify({ event: 'createConsumerTransport' }));
             } catch (error) {
               console.error('Error loading device:', error);
@@ -50,30 +57,35 @@ function App() {
           if (data.error) {
             console.error('Error creating transport:', data.error);
           } else {
-            console.log('Consumer transport created:', data.transport);
+            console.log('Consumer transport created:', data.consumerTransport);
             transportRef.current = deviceRef.current?.createRecvTransport({
-              id: data.transport.id,
-              iceParameters: data.transport.iceParameters,
-              iceCandidates: data.transport.iceCandidates,
-              dtlsParameters: data.transport.dtlsParameters,
+              id: data.consumerTransport.id,
+              iceParameters: data.consumerTransport.iceParameters,
+              iceCandidates: data.consumerTransport.iceCandidates,
+              dtlsParameters: data.consumerTransport.dtlsParameters,
             });
 
-            transportRef.current?.on('connect', async ({ dtlsParameters }: { dtlsParameters: DtlsParameters }, callback: () => void, errback: (error: Error) => void) => {
-              console.log('Transport connect event');
-              wsRef.current?.send(JSON.stringify({
-                event: 'connectConsumerTransport',
-                transportId: transportRef.current?.id,
-                dtlsParameters,
-              }));
-              callback();
+            transportRef.current?.on(
+              'connect',
+              async (
+                { dtlsParameters }: { dtlsParameters: DtlsParameters },
+                callback: () => void,
+                errback: (error: Error) => void
+              ) => {
+                console.log('Transport connect event');
+                wsRef.current?.send(
+                  JSON.stringify({
+                    event: 'connectConsumerTransport',
+                    transportId: transportRef.current?.id,
+                    dtlsParameters,
+                  })
+                );
+                callback();
+              }
+            );
+            transportRef.current?.on('connectionstatechange', (state) => {
+              console.log('!!!! Transport connection state:', state);
             });
-
-            // Request to consume the producer
-            wsRef.current?.send(JSON.stringify({
-              event: 'consume',
-              transportId: transportRef.current?.id,
-              rtpCapabilities: deviceRef.current?.rtpCapabilities,
-            }));
           }
         } else if (data.event === 'consumed') {
           if (data.error) {
@@ -87,12 +99,17 @@ function App() {
               rtpParameters: data.consumer.rtpParameters,
             });
 
-            // Set up the video track
-            const stream = new MediaStream();
-            stream.addTrack(consumerRef.current.track);
+            const stream = new MediaStream([consumerRef.current.track]);
             if (videoRef.current) {
               videoRef.current.srcObject = stream;
             }
+          }
+        } else if (data.event === 'consumerTransportConnected') {
+          if (data.error) {
+            console.error('Error connecting transport:', data.error);
+          } else {
+            console.log('Consumer transport connected');
+            // await transportRef.current?.connect({ dtlsParameters: data.dtlsParameters });
           }
         }
       };
@@ -129,8 +146,13 @@ function App() {
           ref={videoRef}
           autoPlay
           playsInline
+          controls
+          muted
           style={{ width: '640px', height: '480px' }}
         />
+        <button onClick={handleConsume} style={{ marginTop: '20px' }}>
+          Start Consuming
+        </button>
       </header>
     </div>
   );
