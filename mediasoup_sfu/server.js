@@ -109,14 +109,24 @@ const init = async () => {
             } else if (data.event === 'createConsumerTransport') {
                 try {
                     const consumerTransport = await router.createWebRtcTransport({
-                        listenIps: [{ ip: '0.0.0.0', announcedIp: null }],
+                        listenIps: [
+                            { ip: '0.0.0.0', announcedIp: '127.0.0.1' }
+                        ],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
+                        initialAvailableOutgoingBitrate: 1000000,
+                        minimumAvailableOutgoingBitrate: 600000,
+                        maxSctpMessageSize: 262144,
+                        numSctpStreams: { OS: 1024, MIS: 1024 },
                     });
 
                     consumerTransport.on('icestatechange', (iceState) => {
-                        console.log('!!!! Consumer transport ICE state changed:', iceState);
+                        console.log('Consumer transport ICE state changed:', iceState);
+                    });
+
+                    consumerTransport.on('connectionstatechange', (state) => {
+                        console.log('Consumer transport connection state changed:', state);
                     });
 
                     console.log('Consumer transport created:', consumerTransport.id);

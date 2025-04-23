@@ -13,7 +13,8 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
+            file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
             // file: 'mov_hts-samp009.mp4',
         },
     });
@@ -36,107 +37,133 @@ async function main() {
     };
 
     ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
+        try {
+            const data = JSON.parse(event.data);
+            console.log('Received message:', data);
 
-        if (data.event === 'getRtpCapabilities') {
-            if (data.error) {
-                console.error('Error getting RTP Capabilities:', data.error);
-            } else {
-                console.log('RTP Capabilities received from SFU:', data.rtpCapabilities.codecs);
+            if (data.event === 'getRtpCapabilities') {
+                if (data.error) {
+                    console.error('Error getting RTP Capabilities:', data.error);
+                } else {
+                    console.log('RTP Capabilities received from SFU:', data.rtpCapabilities.codecs);
 
-                // Load the device with the received RTP Capabilities
-                try {
-                    await device.load({ routerRtpCapabilities: data.rtpCapabilities });
-                    console.log(data.rtpCapabilities);
-                    console.log('Device loaded successfully');
-                    // Create a transport
-                    ws.send(JSON.stringify({ event: 'createProducerTransport' }));
-                } catch (error) {
-                    console.error('Error loading device:', error);
+                    try {
+                        await device.load({ routerRtpCapabilities: data.rtpCapabilities });
+                        console.log(data.rtpCapabilities.codecs);
+                        console.log('Device loaded successfully');
+                        ws.send(JSON.stringify({ event: 'createProducerTransport' }));
+                    } catch (error) {
+                        console.error('Error loading device:', error);
+                    }
                 }
-            }
-        } else if (data.event === 'producerTransportCreated') {
-            if (data.error) {
-                console.error('Error creating transport:', data.error);
-            } else {
-                console.log('Transport created:', data.producerTransport);
+            } else if (data.event === 'producerTransportCreated') {
+                if (data.error) {
+                    console.error('Error creating transport:', data.error);
+                } else {
+                    console.log('Transport created:', data.producerTransport);
 
-                // create the transport
-                const transport = device.createSendTransport({
-                    id: data.producerTransport.id,
-                    iceParameters: data.producerTransport.iceParameters,
-                    iceCandidates: data.producerTransport.iceCandidates,
-                    dtlsParameters: data.producerTransport.dtlsParameters,
-                });
+                    const transport = device.createSendTransport({
+                        id: data.producerTransport.id,
+                        iceParameters: data.producerTransport.iceParameters,
+                        iceCandidates: data.producerTransport.iceCandidates,
+                        dtlsParameters: data.producerTransport.dtlsParameters,
+                    });
 
-                transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
-                    console.log('Transport connect event:', dtlsParameters);
+                    let connectHandler = null;
+                    let produceHandler = null;
 
-                    // Send the DTLS parameters to the SFU server
-                    ws.send(JSON.stringify({
-                        event: 'connectProducerTransport',
-                        transportId: transport.id,
-                        dtlsParameters,
-                    }));
-                    callback();
+                    transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+                        console.log('Transport connect event:', dtlsParameters);
 
-                    // // Wait for the server to respond with the connection status
-                    // ws.onmessage = (event) => {
-                    //     const data = JSON.parse(event.data);
-                    //     if (data.event === 'producerTransportConnected' && data.transportId === transport.id) {
-                    //         console.log()
-                    //         if (data.error) {
-                    //             errback(new Error(data.error));
-                    //         } else {
-                    //             callback();
-                    //         }
-                    //     }
-                    // };
-                });
-                transport.on('produce', async ({ kind, rtpParameters, appData }, callback, errback) => {
-                    console.log('Transport produce event:', kind, rtpParameters.codecs);
-
-                    // Send the produce request to the SFU server
-                    ws.send(JSON.stringify({
-                        event: 'produce',
-                        transportData: {
+                        ws.send(JSON.stringify({
+                            event: 'connectProducerTransport',
                             transportId: transport.id,
-                            kind,
-                            rtpParameters,
-                            appData
-                        }
-                    }));
+                            dtlsParameters,
+                        }));
 
-                    // Wait for the server to respond with the producer ID
-                    ws.onmessage = (event) => {
-                        const data = JSON.parse(event.data);
-                        if (data.event === 'produce' && data.transportId === transport.id) {
-                            if (data.error) {
-                                errback(new Error(data.error));
-                            } else {
-                                console.log('Video track produced:', transport.id);
-                                callback({ id: data.producerId });
+                        // Remove previous handler if exists
+                        if (connectHandler) {
+                            ws.removeListener('message', connectHandler);
+                        }
+
+                        // Create new handler
+                        connectHandler = (event) => {
+                            try {
+                                const responseData = JSON.parse(event.data);
+                                if (responseData.event === 'producerTransportConnected' && responseData.transportId === transport.id) {
+                                    ws.removeListener('message', connectHandler);
+                                    connectHandler = null;
+                                    if (responseData.error) {
+                                        errback(new Error(responseData.error));
+                                    } else {
+                                        console.log('Transport connected successfully');
+                                        callback();
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error parsing message in connect handler:', error);
                             }
+                        };
+                        ws.on('message', connectHandler);
+                    });
+
+                    transport.on('produce', async ({ kind, rtpParameters, appData }, callback, errback) => {
+                        console.log('Transport produce event:', kind, rtpParameters.codecs);
+
+                        ws.send(JSON.stringify({
+                            event: 'produce',
+                            transportData: {
+                                transportId: transport.id,
+                                kind,
+                                rtpParameters,
+                                appData
+                            }
+                        }));
+
+                        // Remove previous handler if exists
+                        if (produceHandler) {
+                            ws.removeListener('message', produceHandler);
                         }
-                    };
-                });
 
-                transport.on('connectionstatechange', (state) => {
-                    console.log('!!!! Transport connection state:', state);
-                });
+                        // Create new handler
+                        produceHandler = (event) => {
+                            try {
+                                const responseData = JSON.parse(event.data);
+                                if (responseData.event === 'produced' && responseData.transportId === transport.id) {
+                                    ws.removeListener('message', produceHandler);
+                                    produceHandler = null;
+                                    if (responseData.error) {
+                                        errback(new Error(responseData.error));
+                                    } else {
+                                        console.log('Video track produced:', transport.id);
+                                        callback({ id: responseData.producerId });
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error parsing message in produce handler:', error);
+                            }
+                        };
+                        ws.on('message', produceHandler);
+                    });
 
-                await transport.produce({ track: videoTrack })
-                
-            }
-        }
-        else if (data.event === 'connectTransport') {
-            if (data.error) {
-                console.error('Error connecting transport:', data.error);
-            } else {
+                    transport.on('connectionstatechange', (state) => {
+                        console.log('Transport connection state:', state);
+                    });
+
+                    try {
+                        await transport.produce({ track: videoTrack });
+                        console.log('Video track production started');
+                    } catch (error) {
+                        console.error('Error producing video track:', error);
+                    }
+                }
+            } else if (data.event === 'producerTransportConnected') {
                 console.log('Transport connected:', data.status);
+            } else {
+                console.log('Unknown event:', data);
             }
-        } else {
-            console.log('Unknown event:', data);
+        } catch (error) {
+            console.error('Error processing message:', error);
         }
     };
 

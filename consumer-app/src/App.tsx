@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Device, types } from 'mediasoup-client';
 import './App.css';
 
@@ -12,6 +12,8 @@ function App() {
   const consumerRef = useRef<any>(null);
   const transportRef = useRef<types.Transport | undefined>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [isStreamReady, setIsStreamReady] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const handleConsume = async () => {
     if (wsRef.current && transportRef.current && deviceRef.current) {
@@ -23,6 +25,17 @@ function App() {
           rtpCapabilities: deviceRef.current.rtpCapabilities,
         })
       );
+    }
+  };
+
+  const handlePlay = async () => {
+    if (videoRef.current && stream) {
+      try {
+        await videoRef.current.play();
+        console.log('Video playback started');
+      } catch (error) {
+        console.error('Error playing video:', error);
+      }
     }
   };
 
@@ -83,25 +96,49 @@ function App() {
                 callback();
               }
             );
+
             transportRef.current?.on('connectionstatechange', (state) => {
-              console.log('!!!! Transport connection state:', state);
+              console.log('Transport connection state:', state);
             });
+
+            handleConsume();
           }
         } else if (data.event === 'consumed') {
           if (data.error) {
             console.error('Error consuming:', data.error);
           } else {
             console.log('Consumer created:', data.consumer);
-            consumerRef.current = await transportRef.current?.consume({
-              id: data.consumer.id,
-              producerId: data.consumer.producerId,
-              kind: data.consumer.kind,
-              rtpParameters: data.consumer.rtpParameters,
-            });
+            try {
+              consumerRef.current = await transportRef.current?.consume({
+                id: data.consumer.id,
+                producerId: data.consumer.producerId,
+                kind: data.consumer.kind,
+                rtpParameters: data.consumer.rtpParameters,
+              });
 
-            const stream = new MediaStream([consumerRef.current.track]);
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream;
+              console.log('Consumer track:', consumerRef.current?.track);
+              const newStream = new MediaStream();
+              if (consumerRef.current?.track) {
+                newStream.addTrack(consumerRef.current.track);
+                console.log('Stream tracks:', newStream.getTracks());
+                setStream(newStream);
+                setIsStreamReady(true);
+
+                // Force video element to update
+                if (videoRef.current) {
+                  videoRef.current.srcObject = newStream;
+                  // 自動再生を試みる
+                  videoRef.current.play().then(() => {
+                    console.log('Video playback started successfully');
+                  }).catch(error => {
+                    console.error('Error playing video:', error);
+                    // 自動再生が失敗した場合、ユーザーに手動再生を促す
+                    alert('Please click the play button to start the video');
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('Error setting up consumer:', error);
             }
           }
         } else if (data.event === 'consumerTransportConnected') {
@@ -109,7 +146,6 @@ function App() {
             console.error('Error connecting transport:', data.error);
           } else {
             console.log('Consumer transport connected');
-            // await transportRef.current?.connect({ dtlsParameters: data.dtlsParameters });
           }
         }
       };
@@ -138,6 +174,12 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
   return (
     <div className="App">
       <header className="App-header">
@@ -147,12 +189,19 @@ function App() {
           autoPlay
           playsInline
           controls
-          muted
+          muted  // 初期状態でミュート
           style={{ width: '640px', height: '480px' }}
         />
-        <button onClick={handleConsume} style={{ marginTop: '20px' }}>
-          Start Consuming
-        </button>
+        <div style={{ marginTop: '20px' }}>
+          <button onClick={handleConsume} style={{ marginRight: '10px' }}>
+            Start Consuming
+          </button>
+          {isStreamReady && (
+            <button onClick={handlePlay}>
+              Play Video
+            </button>
+          )}
+        </div>
       </header>
     </div>
   );
