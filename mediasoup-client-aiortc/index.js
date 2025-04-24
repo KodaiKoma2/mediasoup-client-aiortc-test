@@ -13,8 +13,9 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+            // file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
             // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
+            file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/build_code_demo.mp4',
             // file: 'mov_hts-samp009.mp4',
         },
     });
@@ -24,6 +25,7 @@ async function main() {
 
     const device = new Device({
         handlerFactory: worker.createHandlerFactory(),
+        logLevel: 'debug',
     });
 
     // Connect to the SFU server using WebSocket
@@ -39,7 +41,7 @@ async function main() {
     ws.onmessage = async (event) => {
         try {
             const data = JSON.parse(event.data);
-            console.log('Received message:', data);
+            console.log('Received message:', data.event);
 
             if (data.event === 'getRtpCapabilities') {
                 if (data.error) {
@@ -49,7 +51,6 @@ async function main() {
 
                     try {
                         await device.load({ routerRtpCapabilities: data.rtpCapabilities });
-                        console.log(data.rtpCapabilities.codecs);
                         console.log('Device loaded successfully');
                         ws.send(JSON.stringify({ event: 'createProducerTransport' }));
                     } catch (error) {
@@ -75,6 +76,12 @@ async function main() {
                     transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                         console.log('Transport connect event:', dtlsParameters);
 
+                        // Ensure role is set to 'auto' or 'client'
+                        if (dtlsParameters.role !== 'client' && dtlsParameters.role !== 'auto') {
+                            console.log('Setting DTLS role to client from ', dtlsParameters.role);
+                            dtlsParameters.role = 'client';
+                        }
+
                         ws.send(JSON.stringify({
                             event: 'connectProducerTransport',
                             transportId: transport.id,
@@ -89,8 +96,9 @@ async function main() {
                         // Create new handler
                         connectHandler = (event) => {
                             try {
-                                const responseData = JSON.parse(event.data);
-                                if (responseData.event === 'producerTransportConnected' && responseData.transportId === transport.id) {
+                                const responseData = JSON.parse(event);
+                                console.log('Respnse data:', responseData);
+                                if (responseData.event === 'producerTransportConnected') {
                                     ws.removeListener('message', connectHandler);
                                     connectHandler = null;
                                     if (responseData.error) {
@@ -128,15 +136,16 @@ async function main() {
                         // Create new handler
                         produceHandler = (event) => {
                             try {
-                                const responseData = JSON.parse(event.data);
-                                if (responseData.event === 'produced' && responseData.transportId === transport.id) {
+                                const responseData = JSON.parse(event);
+                                console.log('Response data:', responseData);
+                                if (responseData.event === 'produced') {
                                     ws.removeListener('message', produceHandler);
                                     produceHandler = null;
                                     if (responseData.error) {
                                         errback(new Error(responseData.error));
                                     } else {
-                                        console.log('Video track produced:', transport.id);
-                                        callback({ id: responseData.producerId });
+                                        console.log('Video track produced:', responseData.id);
+                                        callback({ id: responseData.id });
                                     }
                                 }
                             } catch (error) {
@@ -148,6 +157,13 @@ async function main() {
 
                     transport.on('connectionstatechange', (state) => {
                         console.log('Transport connection state:', state);
+                    });
+
+                    transport.on('icestatechange', (state) => {
+                        console.log('Producer transport ICE state changed:', state);
+                    });
+                    transport.on('iceconnectionstatechange', (state) => {
+                        console.log('Transport ICE connection state:', state);
                     });
 
                     try {

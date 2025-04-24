@@ -85,7 +85,7 @@ function App() {
                 callback: () => void,
                 errback: (error: Error) => void
               ) => {
-                console.log('Transport connect event');
+                console.log('Transport connect event', dtlsParameters);
                 wsRef.current?.send(
                   JSON.stringify({
                     event: 'connectConsumerTransport',
@@ -93,7 +93,28 @@ function App() {
                     dtlsParameters,
                   })
                 );
-                callback();
+
+                // Temporary handler for the 'consumerTransportConnected' event
+                const handleTransportConnected = (event: MessageEvent) => {
+                  const message = event.data.toString();
+                  const data = JSON.parse(message);
+
+                  if (data.event === 'consumerTransportConnected') {
+                    if (data.error) {
+                      console.error('Error connecting transport:', data.error);
+                      errback(new Error(data.error));
+                    } else {
+                      console.log('Consumer transport connected');
+                      callback();
+                    }
+
+                    // Remove this handler after processing the event
+                    wsRef.current?.removeEventListener('message', handleTransportConnected);
+                  }
+                };
+
+                // Add the temporary handler
+                wsRef.current?.addEventListener('message', handleTransportConnected);
               }
             );
 
@@ -128,26 +149,27 @@ function App() {
                 if (videoRef.current) {
                   videoRef.current.srcObject = newStream;
                   // 自動再生を試みる
-                  videoRef.current.play().then(() => {
-                    console.log('Video playback started successfully');
-                  }).catch(error => {
-                    console.error('Error playing video:', error);
-                    // 自動再生が失敗した場合、ユーザーに手動再生を促す
-                    alert('Please click the play button to start the video');
-                  });
+                  // videoRef.current.play().then(() => {
+                  //   console.log('Video playback started successfully');
+                  // }).catch(error => {
+                  //   console.error('Error playing video:', error);
+                  //   // 自動再生が失敗した場合、ユーザーに手動再生を促す
+                  //   alert('Please click the play button to start the video');
+                  // });
                 }
               }
             } catch (error) {
               console.error('Error setting up consumer:', error);
             }
           }
-        } else if (data.event === 'consumerTransportConnected') {
-          if (data.error) {
-            console.error('Error connecting transport:', data.error);
-          } else {
-            console.log('Consumer transport connected');
-          }
-        }
+        } 
+        // else if (data.event === 'consumerTransportConnected') {
+        //   if (data.error) {
+        //     console.error('Error connecting transport:', data.error);
+        //   } else {
+        //     console.log('Consumer transport connected');
+        //   }
+        // }
       };
 
       wsRef.current.onerror = (error) => {
@@ -179,6 +201,15 @@ function App() {
       videoRef.current.srcObject = stream;
     }
   }, [stream]);
+
+  useEffect(() => {
+    if (consumerRef.current?.track) {
+      consumerRef.current.track.enabled = true; // トラックを有効化
+      consumerRef.current.track.onunmute = () => {
+        console.log('Track unmuted');
+      };
+    }
+  }, []);
 
   return (
     <div className="App">

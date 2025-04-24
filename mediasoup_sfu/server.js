@@ -12,25 +12,36 @@ const producers = new Map();
 
 const init = async () => {
     const worker = await createWorker({
-        logLevel: 'warn',
+        logLevel: 'debug',
+        logTags: [
+            'info',
+            'ice',
+            'dtls',
+            'rtp',
+            'srtp',
+            'rtcp',
+        ],
+        rtcMinPort: 40000,
+        rtcMaxPort: 49999,
     });
 
     console.log('Worker created');
 
-    const mediaCodecs = [
-        {
-            kind: 'video',
-            mimeType: 'video/VP8',
-            clockRate: 90000,
-            parameters: {
-                xGoogleStartBitrate: 1000,
-            },
-        },
-    ];
+    // const mediaCodecs = [
+    //     {
+    //         kind: 'video',
+    //         mimeType: 'video/VP8',
+    //         clockRate: 90000,
+    //         parameters: {
+    //             xGoogleStartBitrate: 1000,
+    //         },
+    //     },
+    // ];
 
-    const router = await worker.createRouter({
-        mediaCodecs,
-    });
+    // const router = await worker.createRouter({
+    //     mediaCodecs,
+    // });
+    const router = await worker.createRouter();
     console.log('Router created');
 
     // WebSocket connection handling
@@ -52,7 +63,7 @@ const init = async () => {
             } else if (data.event === 'createProducerTransport') {
                 try {
                     const producerTransport = await router.createWebRtcTransport({
-                        listenIps: [{ ip: '0.0.0.0', announcedIp: null }],
+                        listenIps: [{ ip: '0.0.0.0', announcedIp: '172.20.197.163' }],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
@@ -70,14 +81,23 @@ const init = async () => {
                         }
                     }));
 
+                    producerTransport.on('icestatechange', (iceState) => {
+                        console.log('Producer transport ICE state changed:', iceState);
+                    });
+
+                    producerTransport.on('connectionstatechange', (state) => {
+                        console.log('Producer transport connection state changed:', state);
+                    });
+
                     // Handle DTLS parameters from the client
                     ws.on('message', async (message) => {
                         const transportData = JSON.parse(message);
-                        console.log('Transport data:', transportData);
+                        
                         if (transportData.event === 'connectProducerTransport') {
+                            console.log('Received DTLS parameters:', transportData.dtlsParameters);
+
                             try {
                                 await producerTransport.connect({ dtlsParameters: transportData.dtlsParameters });
-                                console.log('iceState:', producerTransport.iceState);
                                 console.log('Transport connected:', producerTransport.id);
                                 ws.send(JSON.stringify({ event: 'producerTransportConnected', status: 'connected' }));
                             } catch (error) {
@@ -87,14 +107,13 @@ const init = async () => {
                         } else if (transportData.event === 'produce') {
                             try {
                                 console.log(transportData.transportData)
-                                console.log('iceState:', producerTransport.iceState); // Conncted
                                 const producer = await producerTransport.produce({
                                     kind: transportData.transportData.kind, 
                                     rtpParameters: transportData.transportData.rtpParameters, 
                                     appData: transportData.transportData.appData
                                 });
                                 // Store the producer
-                                console.log('Producer created:', producer);
+                                console.log('Producer created:', producer.id);
                                 producers.set(producer.id, producer);
                                 ws.send(JSON.stringify({ event: 'produced', id: producer.id }));
                             } catch (error) {
@@ -115,10 +134,10 @@ const init = async () => {
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
-                        initialAvailableOutgoingBitrate: 1000000,
-                        minimumAvailableOutgoingBitrate: 600000,
-                        maxSctpMessageSize: 262144,
-                        numSctpStreams: { OS: 1024, MIS: 1024 },
+                        // initialAvailableOutgoingBitrate: 1000000,
+                        // minimumAvailableOutgoingBitrate: 600000,
+                        // maxSctpMessageSize: 262144,
+                        // numSctpStreams: { OS: 1024, MIS: 1024 },
                     });
 
                     consumerTransport.on('icestatechange', (iceState) => {
@@ -144,12 +163,10 @@ const init = async () => {
                     // Handle DTLS parameters from the client
                     ws.on('message', async (message) => {
                         const transportData = JSON.parse(message);
-                        console.log('Consumer transport data:', transportData);
                         if (transportData.event === 'connectConsumerTransport') {
                             try {
                                 await consumerTransport.connect({ dtlsParameters: transportData.dtlsParameters });
                                 console.log('Consumer transport connected:', consumerTransport.id);
-                                console.log('iceState:', consumerTransport.iceState);
                                 ws.send(JSON.stringify({ event: 'consumerTransportConnected', status: 'connected' }));
                             } catch (error) {
                                 console.error('Error connecting consumer transport:', error);
@@ -160,7 +177,6 @@ const init = async () => {
                                 // Get the first available producer
                                 const producerIds = Array.from(producers.keys());
                                 console.log('consume event')
-                                console.log('iceState:', consumerTransport.iceState);
                                 if (producerIds.length === 0) {
                                     throw new Error('No producers available');
                                 }
@@ -168,6 +184,7 @@ const init = async () => {
                                 const producer = producers.get(producerId);
 
                                 console.log('Consuming for producer:', producerId);
+                                console.log('rtpCapabilities:', transportData.rtpCapabilities);
 
                                 const consumer = await consumerTransport.consume({
                                     producerId: producer.id,
@@ -175,7 +192,7 @@ const init = async () => {
                                 });
 
                                 console.log('Consumer created:', consumer.id);
-                                console.log('iceState:', consumerTransport.iceState);
+                                console.log('Consumer parameters:', consumer.rtpParameters);
 
                                 ws.send(JSON.stringify({
                                     event: 'consumed',
