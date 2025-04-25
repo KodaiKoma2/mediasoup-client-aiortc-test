@@ -9,7 +9,7 @@ interface DtlsParameters {
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const deviceRef = useRef<Device | null>(null);
-  const consumerRef = useRef<any>(null);
+  const consumerRef = useRef<types.Consumer | undefined>(null);
   const transportRef = useRef<types.Transport | undefined>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [isStreamReady, setIsStreamReady] = useState(false);
@@ -136,12 +136,13 @@ function App() {
                 kind: data.consumer.kind,
                 rtpParameters: data.consumer.rtpParameters,
               });
-
+              console.log('consumerRef:', consumerRef.current);
               console.log('Consumer track:', consumerRef.current?.track);
               const newStream = new MediaStream();
               if (consumerRef.current?.track) {
                 newStream.addTrack(consumerRef.current.track);
                 console.log('Stream tracks:', newStream.getTracks());
+                console.log('consumer stats:', await consumerRef.current.getStats());
                 setStream(newStream);
                 setIsStreamReady(true);
 

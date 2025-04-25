@@ -52,6 +52,7 @@ async function main() {
                     try {
                         await device.load({ routerRtpCapabilities: data.rtpCapabilities });
                         console.log('Device loaded successfully');
+                        console.log('can produce video:', device.canProduce('video'));
                         ws.send(JSON.stringify({ event: 'createProducerTransport' }));
                     } catch (error) {
                         console.error('Error loading device:', error);
@@ -77,10 +78,10 @@ async function main() {
                         console.log('Transport connect event:', dtlsParameters);
 
                         // Ensure role is set to 'auto' or 'client'
-                        if (dtlsParameters.role !== 'client' && dtlsParameters.role !== 'auto') {
-                            console.log('Setting DTLS role to client from ', dtlsParameters.role);
-                            dtlsParameters.role = 'client';
-                        }
+                        // if (dtlsParameters.role !== 'client' && dtlsParameters.role !== 'auto') {
+                        //     console.log('Setting DTLS role to client from ', dtlsParameters.role);
+                        //     dtlsParameters.role = 'client';
+                        // }
 
                         ws.send(JSON.stringify({
                             event: 'connectProducerTransport',
@@ -167,8 +168,29 @@ async function main() {
                     });
 
                     try {
-                        await transport.produce({ track: videoTrack });
+                        const producer = await transport.produce({ track: videoTrack });
                         console.log('Video track production started');
+
+                        // Monitor producer events
+                        producer.on('trace', (trace) => {
+                            console.log('Producer trace event:', trace);
+                        });
+
+                        // // Periodically check if the producer is active
+                        // const monitorInterval = setInterval(() => {
+                        //     if (producer.closed) {
+                        //         console.error('Producer is closed');
+                        //         clearInterval(monitorInterval);
+                        //     } else {
+                        //         console.log('Producer is active:', producer.id);
+                        //     }
+                        // }, 5000); // Check every 5 seconds
+
+                        // // Clean up the interval when the producer is closed
+                        // producer.on('close', () => {
+                        //     console.log('Producer closed');
+                        //     clearInterval(monitorInterval);
+                        // });
                     } catch (error) {
                         console.error('Error producing video track:', error);
                     }

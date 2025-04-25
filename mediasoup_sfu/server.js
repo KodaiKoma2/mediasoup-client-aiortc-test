@@ -27,21 +27,21 @@ const init = async () => {
 
     console.log('Worker created');
 
-    // const mediaCodecs = [
-    //     {
-    //         kind: 'video',
-    //         mimeType: 'video/VP8',
-    //         clockRate: 90000,
-    //         parameters: {
-    //             xGoogleStartBitrate: 1000,
-    //         },
-    //     },
-    // ];
+    const mediaCodecs = [
+        {
+            kind: 'video',
+            mimeType: 'video/VP8',
+            clockRate: 90000,
+            parameters: {
+                xGoogleStartBitrate: 1000,
+            },
+        },
+    ];
 
-    // const router = await worker.createRouter({
-    //     mediaCodecs,
-    // });
-    const router = await worker.createRouter();
+    const router = await worker.createRouter({
+        mediaCodecs,
+    });
+    // const router = await worker.createRouter();
     console.log('Router created');
 
     // WebSocket connection handling
@@ -112,6 +112,10 @@ const init = async () => {
                                     rtpParameters: transportData.transportData.rtpParameters, 
                                     appData: transportData.transportData.appData
                                 });
+                                // await producer.enableTraceEvent(["rtp", "pli", 'fir', "keyframe", "nack", "sr"]);
+                                // producer.on('trace', (trace) => {
+                                //     console.log('Producer trace event:', trace);
+                                // })
                                 // Store the producer
                                 console.log('Producer created:', producer.id);
                                 producers.set(producer.id, producer);
