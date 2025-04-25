@@ -13,9 +13,9 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            // file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+            file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
             // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
-            file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/build_code_demo.mp4',
+            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/build_code_demo.mp4',
             // file: 'mov_hts-samp009.mp4',
         },
     });
@@ -29,7 +29,7 @@ async function main() {
     });
 
     // Connect to the SFU server using WebSocket
-    const ws = new WebSocket('ws://localhost:3000');
+    const ws = new WebSocket('ws://10.0.0.52:3000');
 
     ws.onopen = () => {
         console.log('WebSocket connection established');
@@ -69,6 +69,7 @@ async function main() {
                         iceParameters: data.producerTransport.iceParameters,
                         iceCandidates: data.producerTransport.iceCandidates,
                         dtlsParameters: data.producerTransport.dtlsParameters,
+                        iceTransportPolicy: 'all',
                     });
 
                     let connectHandler = null;

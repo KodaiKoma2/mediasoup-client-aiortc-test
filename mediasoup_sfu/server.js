@@ -63,7 +63,8 @@ const init = async () => {
             } else if (data.event === 'createProducerTransport') {
                 try {
                     const producerTransport = await router.createWebRtcTransport({
-                        listenIps: [{ ip: '0.0.0.0', announcedIp: '172.20.197.163' }],
+                        // listenIps: [{ ip: '0.0.0.0', announcedIp: '172.20.197.163' }],
+                        listenIps: [{ ip: '0.0.0.0', announcedIp: '10.0.0.52' }],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
@@ -133,15 +134,11 @@ const init = async () => {
                 try {
                     const consumerTransport = await router.createWebRtcTransport({
                         listenIps: [
-                            { ip: '0.0.0.0', announcedIp: '127.0.0.1' }
+                            { ip: '0.0.0.0', announcedIp: '10.0.0.52' }
                         ],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
-                        // initialAvailableOutgoingBitrate: 1000000,
-                        // minimumAvailableOutgoingBitrate: 600000,
-                        // maxSctpMessageSize: 262144,
-                        // numSctpStreams: { OS: 1024, MIS: 1024 },
                     });
 
                     consumerTransport.on('icestatechange', (iceState) => {
