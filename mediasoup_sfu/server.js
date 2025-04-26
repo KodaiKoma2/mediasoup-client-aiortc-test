@@ -2,6 +2,10 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import { createWorker } from 'mediasoup';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -9,6 +13,10 @@ const wss = new WebSocketServer({ server });
 
 // Store active producers
 const producers = new Map();
+
+// Get IP address from environment variable or use default
+const ANNOUNCED_IP = process.env.ANNOUNCED_IP || '10.0.0.52';
+const PORT = process.env.PORT || 3000;
 
 const init = async () => {
     const worker = await createWorker({
@@ -63,8 +71,7 @@ const init = async () => {
             } else if (data.event === 'createProducerTransport') {
                 try {
                     const producerTransport = await router.createWebRtcTransport({
-                        // listenIps: [{ ip: '0.0.0.0', announcedIp: '172.20.197.163' }],
-                        listenIps: [{ ip: '0.0.0.0', announcedIp: '10.0.0.52' }],
+                        listenIps: [{ ip: '0.0.0.0', announcedIp: ANNOUNCED_IP }],
                         enableUdp: true,
                         enableTcp: true,
                         preferUdp: true,
@@ -113,6 +120,7 @@ const init = async () => {
                                     rtpParameters: transportData.transportData.rtpParameters, 
                                     appData: transportData.transportData.appData
                                 });
+                                // for debug use
                                 // await producer.enableTraceEvent(["rtp", "pli", 'fir', "keyframe", "nack", "sr"]);
                                 // producer.on('trace', (trace) => {
                                 //     console.log('Producer trace event:', trace);
@@ -134,7 +142,7 @@ const init = async () => {
                 try {
                     const consumerTransport = await router.createWebRtcTransport({
                         listenIps: [
-                            { ip: '0.0.0.0', announcedIp: '10.0.0.52' }
+                            { ip: '0.0.0.0', announcedIp: ANNOUNCED_IP }
                         ],
                         enableUdp: true,
                         enableTcp: true,
@@ -230,9 +238,9 @@ const init = async () => {
 };
 
 // Start the server
-const PORT = 3000;
 server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Announced IP: ${ANNOUNCED_IP}`);
 });
 
 // Initialize mediasoup worker and router

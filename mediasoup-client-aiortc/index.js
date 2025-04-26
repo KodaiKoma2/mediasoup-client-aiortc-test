@@ -4,6 +4,15 @@ import {
 
 import { Device } from "mediasoup-client";
 import { WebSocket } from 'ws';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// Get configuration from environment variables
+const RTSP_URL = process.env.RTSP_URL || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1';
+const SFU_HOST = process.env.SFU_HOST || '10.0.0.52';
+const SFU_PORT = process.env.SFU_PORT || '3000';
 
 async function main() {
     const worker = await createWorker({
@@ -13,10 +22,7 @@ async function main() {
     const stream = await worker.getUserMedia({
         video: {
             source: 'file',
-            file: 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
-            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/mov_hts-samp009.mp4',
-            // file: 'file:///home/kodai/documents/camera/mediasoup-client-test/mediasoup-client-aiortc/build_code_demo.mp4',
-            // file: 'mov_hts-samp009.mp4',
+            file: RTSP_URL,
         },
     });
 
@@ -29,7 +35,7 @@ async function main() {
     });
 
     // Connect to the SFU server using WebSocket
-    const ws = new WebSocket('ws://10.0.0.52:3000');
+    const ws = new WebSocket(`ws://${SFU_HOST}:${SFU_PORT}`);
 
     ws.onopen = () => {
         console.log('WebSocket connection established');
@@ -77,12 +83,6 @@ async function main() {
 
                     transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                         console.log('Transport connect event:', dtlsParameters);
-
-                        // Ensure role is set to 'auto' or 'client'
-                        // if (dtlsParameters.role !== 'client' && dtlsParameters.role !== 'auto') {
-                        //     console.log('Setting DTLS role to client from ', dtlsParameters.role);
-                        //     dtlsParameters.role = 'client';
-                        // }
 
                         ws.send(JSON.stringify({
                             event: 'connectProducerTransport',
@@ -177,21 +177,6 @@ async function main() {
                             console.log('Producer trace event:', trace);
                         });
 
-                        // // Periodically check if the producer is active
-                        // const monitorInterval = setInterval(() => {
-                        //     if (producer.closed) {
-                        //         console.error('Producer is closed');
-                        //         clearInterval(monitorInterval);
-                        //     } else {
-                        //         console.log('Producer is active:', producer.id);
-                        //     }
-                        // }, 5000); // Check every 5 seconds
-
-                        // // Clean up the interval when the producer is closed
-                        // producer.on('close', () => {
-                        //     console.log('Producer closed');
-                        //     clearInterval(monitorInterval);
-                        // });
                     } catch (error) {
                         console.error('Error producing video track:', error);
                     }
