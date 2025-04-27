@@ -10,35 +10,68 @@ interface DtlsParameters {
   [key: string]: any;
 }
 
+interface CameraStream {
+  cameraId: string;
+  stream: MediaStream;
+  consumer: types.Consumer;
+}
+
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const deviceRef = useRef<Device | null>(null);
-  const consumerRef = useRef<types.Consumer | undefined>(null);
   const transportRef = useRef<types.Transport | undefined>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [isStreamReady, setIsStreamReady] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [streams, setStreams] = useState<CameraStream[]>([]);
+  const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
+  const [availableCameras] = useState<string[]>(['camera1', 'camera2']);
 
-  const handleConsume = async () => {
+  const handleConsume = async (cameraId: string) => {
+    if (!cameraId) {
+      console.error('Cannot consume: camera ID is empty');
+      return;
+    }
+    
     if (wsRef.current && transportRef.current && deviceRef.current) {
-      console.log('Sending consume request');
+      console.log(`Sending consume request for camera ${cameraId}`);
       wsRef.current.send(
         JSON.stringify({
           event: 'consume',
           transportId: transportRef.current.id,
+          cameraId: cameraId,
           rtpCapabilities: deviceRef.current.rtpCapabilities,
         })
       );
     }
   };
 
-  const handlePlay = async () => {
-    if (videoRef.current && stream) {
-      try {
-        await videoRef.current.play();
-        console.log('Video playback started');
-      } catch (error) {
-        console.error('Error playing video:', error);
+  // const handlePlay = async () => {
+  //   if (videoRef.current && selectedCamera) {
+  //     const selectedStream = streams.find(s => s.cameraId === selectedCamera);
+  //     if (selectedStream) {
+  //       try {
+  //         videoRef.current.srcObject = selectedStream.stream;
+  //         await videoRef.current.play();
+  //         console.log('Video playback started');
+  //       } catch (error) {
+  //         console.error('Error playing video:', error);
+  //       }
+  //     }
+  //   }
+  // };
+
+  const handleCameraSelect = (cameraId: string) => {
+    if (!cameraId) return;
+    
+    setSelectedCamera(cameraId);
+    if (!streams.find(s => s.cameraId === cameraId)) {
+      console.log(`No existing stream for camera ${cameraId}, initiating consume`);
+      handleConsume(cameraId);
+    } else {
+      console.log(`Using existing stream for camera ${cameraId}`);
+      const selectedStream = streams.find(s => s.cameraId === cameraId);
+      if (selectedStream && videoRef.current) {
+        videoRef.current.srcObject = selectedStream.stream;
       }
     }
   };
@@ -98,7 +131,6 @@ function App() {
                   })
                 );
 
-                // Temporary handler for the 'consumerTransportConnected' event
                 const handleTransportConnected = (event: MessageEvent) => {
                   const message = event.data.toString();
                   const data = JSON.parse(message);
@@ -112,12 +144,10 @@ function App() {
                       callback();
                     }
 
-                    // Remove this handler after processing the event
                     wsRef.current?.removeEventListener('message', handleTransportConnected);
                   }
                 };
 
-                // Add the temporary handler
                 wsRef.current?.addEventListener('message', handleTransportConnected);
               }
             );
@@ -126,36 +156,62 @@ function App() {
               console.log('Transport connection state:', state);
             });
 
-            handleConsume();
+            if (availableCameras.length > 0) {
+              const firstCamera = availableCameras[0];
+              console.log(`Initializing first camera stream: ${firstCamera}`);
+              handleConsume(firstCamera);
+            }
           }
         } else if (data.event === 'consumed') {
           if (data.error) {
-            console.error('Error consuming:', data.error);
+            console.error(`Error consuming camera ${data.cameraId}:`, data.error);
+            if (data.error.includes('No producers available')) {
+              console.log(`Retrying consume for camera ${data.cameraId} in 2 seconds...`);
+              setTimeout(() => {
+                if (data.cameraId) {
+                  handleConsume(data.cameraId);
+                }
+              }, 2000);
+            }
           } else {
             console.log('Consumer created:', data.consumer);
             try {
-              consumerRef.current = await transportRef.current?.consume({
+              const consumer = await transportRef.current?.consume({
                 id: data.consumer.id,
                 producerId: data.consumer.producerId,
                 kind: data.consumer.kind,
                 rtpParameters: data.consumer.rtpParameters,
               });
-              console.log('consumerRef:', consumerRef.current);
-              console.log('Consumer track:', consumerRef.current?.track);
-              const newStream = new MediaStream();
-              if (consumerRef.current?.track) {
-                newStream.addTrack(consumerRef.current.track);
-                console.log('Stream tracks:', newStream.getTracks());
-                console.log('consumer stats:', await consumerRef.current.getStats());
-                setStream(newStream);
-                setIsStreamReady(true);
 
+              if (consumer) {
+                console.log('Consumer track:', consumer.track);
+                const newStream = new MediaStream();
+                if (consumer.track) {
+                  newStream.addTrack(consumer.track);
+                  console.log('Stream tracks:', newStream.getTracks());
+                  console.log('consumer stats:', await consumer.getStats());
+
+                  setStreams(prevStreams => [
+                    ...prevStreams,
+                    {
+                      cameraId: data.cameraId,
+                      stream: newStream,
+                      consumer: consumer
+                    }
+                  ]);
+
+                  setIsStreamReady(true);
+                  
+                  if (data.cameraId === availableCameras[0]) {
+                    setSelectedCamera(data.cameraId);
+                  }
+                }
               }
             } catch (error) {
               console.error('Error setting up consumer:', error);
             }
           }
-        } 
+        }
       };
 
       wsRef.current.onerror = (error) => {
@@ -173,9 +229,11 @@ function App() {
       if (wsRef.current) {
         wsRef.current.close();
       }
-      if (consumerRef.current) {
-        consumerRef.current.close();
-      }
+      streams.forEach(stream => {
+        if (stream.consumer) {
+          stream.consumer.close();
+        }
+      });
       if (transportRef.current) {
         transportRef.current.close();
       }
@@ -183,42 +241,56 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    if (videoRef.current && selectedCamera) {
+      const selectedStream = streams.find(s => s.cameraId === selectedCamera);
+      if (selectedStream) {
+        videoRef.current.srcObject = selectedStream.stream;
+      }
     }
-  }, [stream]);
+  }, [selectedCamera, streams]);
 
   useEffect(() => {
-    if (consumerRef.current?.track) {
-      consumerRef.current.track.enabled = true; // トラックを有効化
-      consumerRef.current.track.onunmute = () => {
-        console.log('Track unmuted');
-      };
-    }
-  }, []);
+    streams.forEach(stream => {
+      if (stream.consumer?.track) {
+        stream.consumer.track.enabled = true;
+        stream.consumer.track.onunmute = () => {
+          console.log(`Track unmuted for camera ${stream.cameraId}`);
+        };
+      }
+    });
+  }, [streams]);
 
   return (
     <div className="App">
       <header className="App-header">
         <h1>SFU Consumer</h1>
+        <div style={{ marginBottom: '20px' }}>
+          <select 
+            value={selectedCamera || ''} 
+            onChange={(e) => handleCameraSelect(e.target.value)}
+            style={{ padding: '5px', marginRight: '10px' }}
+          >
+            <option value="">カメラを選択</option>
+            {availableCameras.map(cameraId => (
+              <option key={cameraId} value={cameraId}>
+                カメラ {cameraId}
+              </option>
+            ))}
+          </select>
+          {/* {isStreamReady && selectedCamera && (
+            <button onClick={handlePlay}>
+              再生
+            </button>
+          )} */}
+        </div>
         <video
           ref={videoRef}
           autoPlay
           playsInline
           controls
-          muted  // 初期状態でミュート
+          muted
           style={{ width: '640px', height: '480px' }}
         />
-        <div style={{ marginTop: '20px' }}>
-          <button onClick={handleConsume} style={{ marginRight: '10px' }}>
-            Start Consuming
-          </button>
-          {isStreamReady && (
-            <button onClick={handlePlay}>
-              Play Video
-            </button>
-          )}
-        </div>
       </header>
     </div>
   );

@@ -11,12 +11,14 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Store active producers
+// Store active producers and transports by camera ID
 const producers = new Map();
+const transports = new Map();
 
 // Get IP address from environment variable or use default
 const ANNOUNCED_IP = process.env.ANNOUNCED_IP || '10.0.0.52';
 const PORT = process.env.PORT || 3000;
+const MAX_PRODUCERS = parseInt(process.env.MAX_PRODUCERS || '10', 10);
 
 const init = async () => {
     const worker = await createWorker({
@@ -70,6 +72,9 @@ const init = async () => {
                 }
             } else if (data.event === 'createProducerTransport') {
                 try {
+                    const cameraId = data.cameraId;
+                    console.log(`Creating transport for camera ${cameraId}`);
+
                     const producerTransport = await router.createWebRtcTransport({
                         listenIps: [{ ip: '0.0.0.0', announcedIp: ANNOUNCED_IP }],
                         enableUdp: true,
@@ -77,10 +82,17 @@ const init = async () => {
                         preferUdp: true,
                     });
 
-                    console.log('Transport created:', producerTransport.id);
+                    console.log(`Transport created for camera ${cameraId}:`, producerTransport.id);
+
+                    // Store transport
+                    if (!transports.has(cameraId)) {
+                        transports.set(cameraId, new Map());
+                    }
+                    transports.get(cameraId).set(producerTransport.id, producerTransport);
 
                     ws.send(JSON.stringify({
                         event: 'producerTransportCreated',
+                        cameraId: cameraId,
                         producerTransport: {
                             id: producerTransport.id,
                             iceParameters: producerTransport.iceParameters,
@@ -90,53 +102,76 @@ const init = async () => {
                     }));
 
                     producerTransport.on('icestatechange', (iceState) => {
-                        console.log('Producer transport ICE state changed:', iceState);
+                        console.log(`Producer transport ICE state changed for camera ${cameraId}:`, iceState);
                     });
 
                     producerTransport.on('connectionstatechange', (state) => {
-                        console.log('Producer transport connection state changed:', state);
+                        console.log(`Producer transport connection state changed for camera ${cameraId}:`, state);
                     });
 
                     // Handle DTLS parameters from the client
                     ws.on('message', async (message) => {
                         const transportData = JSON.parse(message);
                         
-                        if (transportData.event === 'connectProducerTransport') {
-                            console.log('Received DTLS parameters:', transportData.dtlsParameters);
+                        if (transportData.event === 'connectProducerTransport' && 
+                            transportData.cameraId === cameraId) {
+                            console.log(`Received DTLS parameters for camera ${cameraId}:`, transportData.dtlsParameters);
 
                             try {
                                 await producerTransport.connect({ dtlsParameters: transportData.dtlsParameters });
-                                console.log('Transport connected:', producerTransport.id);
-                                ws.send(JSON.stringify({ event: 'producerTransportConnected', status: 'connected' }));
+                                console.log(`Transport connected for camera ${cameraId}:`, producerTransport.id);
+                                ws.send(JSON.stringify({ 
+                                    event: 'producerTransportConnected', 
+                                    cameraId: cameraId,
+                                    status: 'connected' 
+                                }));
                             } catch (error) {
-                                console.error('Error connecting transport:', error);
-                                ws.send(JSON.stringify({ event: 'producerTransportConnected', error: error.message }));
+                                console.error(`Error connecting transport for camera ${cameraId}:`, error);
+                                ws.send(JSON.stringify({ 
+                                    event: 'producerTransportConnected', 
+                                    cameraId: cameraId,
+                                    error: error.message 
+                                }));
                             }
-                        } else if (transportData.event === 'produce') {
+                        } else if (transportData.event === 'produce' && 
+                                 transportData.transportData.cameraId === cameraId) {
                             try {
-                                console.log(transportData.transportData)
+                                console.log(`Producing for camera ${cameraId}:`, transportData.transportData);
                                 const producer = await producerTransport.produce({
                                     kind: transportData.transportData.kind, 
                                     rtpParameters: transportData.transportData.rtpParameters, 
                                     appData: transportData.transportData.appData
                                 });
-                                // for debug use
-                                // await producer.enableTraceEvent(["rtp", "pli", 'fir', "keyframe", "nack", "sr"]);
-                                // producer.on('trace', (trace) => {
-                                //     console.log('Producer trace event:', trace);
-                                // })
+
                                 // Store the producer
-                                console.log('Producer created:', producer.id);
-                                producers.set(producer.id, producer);
-                                ws.send(JSON.stringify({ event: 'produced', id: producer.id }));
+                                if (!producers.has(cameraId)) {
+                                    producers.set(cameraId, new Map());
+                                }
+                                producers.get(cameraId).set(producer.id, producer);
+                                
+                                console.log(`Producer created for camera ${cameraId}:`, producer.id);
+                                ws.send(JSON.stringify({ 
+                                    event: 'produced', 
+                                    cameraId: cameraId,
+                                    id: producer.id 
+                                }));
                             } catch (error) {
-                                console.log("Error producing: ", error);
+                                console.log(`Error producing for camera ${cameraId}:`, error);
+                                ws.send(JSON.stringify({ 
+                                    event: 'produced', 
+                                    cameraId: cameraId,
+                                    error: error.message 
+                                }));
                             }
                         }
                     });
                 } catch (error) {
                     console.error('Error creating transport:', error);
-                    ws.send(JSON.stringify({ event: 'createTransport', error: error.message }));
+                    ws.send(JSON.stringify({ 
+                        event: 'createTransport', 
+                        cameraId: data.cameraId,
+                        error: error.message 
+                    }));
                 }
             } else if (data.event === 'createConsumerTransport') {
                 try {
@@ -183,16 +218,23 @@ const init = async () => {
                             }
                         } else if (transportData.event === 'consume') {
                             try {
-                                // Get the first available producer
-                                const producerIds = Array.from(producers.keys());
-                                console.log('consume event')
-                                if (producerIds.length === 0) {
-                                    throw new Error('No producers available');
-                                }
-                                const producerId = producerIds[0];
-                                const producer = producers.get(producerId);
+                                const cameraId = transportData.cameraId;
+                                console.log(`Consuming request received for camera ${cameraId}`);
 
-                                console.log('Consuming for producer:', producerId);
+                                // Get the producer for the specified camera
+                                const cameraProducers = producers.get(cameraId);
+                                console.log(`Available producers for camera ${cameraId}:`, 
+                                    cameraProducers ? Array.from(cameraProducers.keys()) : 'none');
+
+                                if (!cameraProducers || cameraProducers.size === 0) {
+                                    console.error(`No producers available for camera ${cameraId}`);
+                                    throw new Error(`No producers available for camera ${cameraId}`);
+                                }
+
+                                const producerId = Array.from(cameraProducers.keys())[0];
+                                const producer = cameraProducers.get(producerId);
+
+                                console.log(`Consuming for producer: ${producerId} (camera ${cameraId})`);
                                 console.log('rtpCapabilities:', transportData.rtpCapabilities);
 
                                 const consumer = await consumerTransport.consume({
@@ -205,6 +247,7 @@ const init = async () => {
 
                                 ws.send(JSON.stringify({
                                     event: 'consumed',
+                                    cameraId: cameraId,
                                     consumer: {
                                         id: consumer.id,
                                         producerId: producer.id,
@@ -214,7 +257,11 @@ const init = async () => {
                                 }));
                             } catch (error) {
                                 console.error('Error consuming:', error);
-                                ws.send(JSON.stringify({ event: 'consumed', error: error.message }));
+                                ws.send(JSON.stringify({ 
+                                    event: 'consumed', 
+                                    cameraId: transportData.cameraId,
+                                    error: error.message 
+                                }));
                             }
                         }
                     });
@@ -227,10 +274,26 @@ const init = async () => {
 
         ws.on('close', () => {
             console.log('Client disconnected');
-            // Clean up producers when client disconnects
-            producers.forEach((producer, id) => {
-                if (producer.closed) {
-                    producers.delete(id);
+            // Clean up producers and transports when client disconnects
+            producers.forEach((cameraProducers, cameraId) => {
+                cameraProducers.forEach((producer, id) => {
+                    if (producer.closed) {
+                        cameraProducers.delete(id);
+                    }
+                });
+                if (cameraProducers.size === 0) {
+                    producers.delete(cameraId);
+                }
+            });
+
+            transports.forEach((cameraTransports, cameraId) => {
+                cameraTransports.forEach((transport, id) => {
+                    if (transport.closed) {
+                        cameraTransports.delete(id);
+                    }
+                });
+                if (cameraTransports.size === 0) {
+                    transports.delete(cameraId);
                 }
             });
         });
@@ -241,6 +304,7 @@ const init = async () => {
 server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
     console.log(`Announced IP: ${ANNOUNCED_IP}`);
+    console.log(`Maximum producers per camera: ${MAX_PRODUCERS}`);
 });
 
 // Initialize mediasoup worker and router

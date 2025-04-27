@@ -10,24 +10,22 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Get configuration from environment variables
-const RTSP_URL = process.env.RTSP_URL || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1';
+const RTSP_URLS = {
+    camera1: process.env.RTSP_URL_1 || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+    camera2: process.env.RTSP_URL_2 || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+    // Add more cameras as needed
+};
+
 const SFU_HOST = process.env.SFU_HOST || '10.0.0.52';
 const SFU_PORT = process.env.SFU_PORT || '3000';
+
+// Store active producers
+const producers = new Map();
 
 async function main() {
     const worker = await createWorker({
         logLevel: 'warn',
     });
-
-    const stream = await worker.getUserMedia({
-        video: {
-            source: 'file',
-            file: RTSP_URL,
-        },
-    });
-
-    const videoTrack = stream.getVideoTracks()[0];
-    console.log(videoTrack);
 
     const device = new Device({
         handlerFactory: worker.createHandlerFactory(),
@@ -39,8 +37,6 @@ async function main() {
 
     ws.onopen = () => {
         console.log('WebSocket connection established');
-
-        // Request RTP Capabilities from the SFU server
         ws.send(JSON.stringify({ event: 'getRtpCapabilities' }));
     };
 
@@ -59,7 +55,11 @@ async function main() {
                         await device.load({ routerRtpCapabilities: data.rtpCapabilities });
                         console.log('Device loaded successfully');
                         console.log('can produce video:', device.canProduce('video'));
-                        ws.send(JSON.stringify({ event: 'createProducerTransport' }));
+                        
+                        // Initialize streams for all cameras
+                        for (const [cameraId, rtspUrl] of Object.entries(RTSP_URLS)) {
+                            await initializeCameraStream(cameraId, rtspUrl, worker, device, ws);
+                        }
                     } catch (error) {
                         console.error('Error loading device:', error);
                     }
@@ -68,7 +68,8 @@ async function main() {
                 if (data.error) {
                     console.error('Error creating transport:', data.error);
                 } else {
-                    console.log('Transport created:', data.producerTransport);
+                    const cameraId = data.cameraId;
+                    console.log(`Transport created for camera ${cameraId}:`, data.producerTransport);
 
                     const transport = device.createSendTransport({
                         id: data.producerTransport.id,
@@ -82,31 +83,30 @@ async function main() {
                     let produceHandler = null;
 
                     transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
-                        console.log('Transport connect event:', dtlsParameters);
+                        console.log(`Transport connect event for camera ${cameraId}:`, dtlsParameters);
 
                         ws.send(JSON.stringify({
                             event: 'connectProducerTransport',
                             transportId: transport.id,
+                            cameraId: cameraId,
                             dtlsParameters,
                         }));
 
-                        // Remove previous handler if exists
                         if (connectHandler) {
                             ws.removeListener('message', connectHandler);
                         }
 
-                        // Create new handler
                         connectHandler = (event) => {
                             try {
                                 const responseData = JSON.parse(event);
-                                console.log('Respnse data:', responseData);
-                                if (responseData.event === 'producerTransportConnected') {
+                                if (responseData.event === 'producerTransportConnected' && 
+                                    responseData.cameraId === cameraId) {
                                     ws.removeListener('message', connectHandler);
                                     connectHandler = null;
                                     if (responseData.error) {
                                         errback(new Error(responseData.error));
                                     } else {
-                                        console.log('Transport connected successfully');
+                                        console.log(`Transport connected successfully for camera ${cameraId}`);
                                         callback();
                                     }
                                 }
@@ -118,35 +118,34 @@ async function main() {
                     });
 
                     transport.on('produce', async ({ kind, rtpParameters, appData }, callback, errback) => {
-                        console.log('Transport produce event:', kind, rtpParameters.codecs);
+                        console.log(`Transport produce event for camera ${cameraId}:`, kind, rtpParameters.codecs);
 
                         ws.send(JSON.stringify({
                             event: 'produce',
                             transportData: {
                                 transportId: transport.id,
+                                cameraId: cameraId,
                                 kind,
                                 rtpParameters,
                                 appData
                             }
                         }));
 
-                        // Remove previous handler if exists
                         if (produceHandler) {
                             ws.removeListener('message', produceHandler);
                         }
 
-                        // Create new handler
                         produceHandler = (event) => {
                             try {
                                 const responseData = JSON.parse(event);
-                                console.log('Response data:', responseData);
-                                if (responseData.event === 'produced') {
+                                if (responseData.event === 'produced' && 
+                                    responseData.cameraId === cameraId) {
                                     ws.removeListener('message', produceHandler);
                                     produceHandler = null;
                                     if (responseData.error) {
                                         errback(new Error(responseData.error));
                                     } else {
-                                        console.log('Video track produced:', responseData.id);
+                                        console.log(`Video track produced for camera ${cameraId}:`, responseData.id);
                                         callback({ id: responseData.id });
                                     }
                                 }
@@ -158,31 +157,43 @@ async function main() {
                     });
 
                     transport.on('connectionstatechange', (state) => {
-                        console.log('Transport connection state:', state);
+                        console.log(`Transport connection state for camera ${cameraId}:`, state);
                     });
 
                     transport.on('icestatechange', (state) => {
-                        console.log('Producer transport ICE state changed:', state);
+                        console.log(`Producer transport ICE state changed for camera ${cameraId}:`, state);
                     });
+
                     transport.on('iceconnectionstatechange', (state) => {
-                        console.log('Transport ICE connection state:', state);
+                        console.log(`Transport ICE connection state for camera ${cameraId}:`, state);
                     });
 
                     try {
-                        const producer = await transport.produce({ track: videoTrack });
-                        console.log('Video track production started');
+                        const stream = await worker.getUserMedia({
+                            video: {
+                                source: 'file',
+                                file: RTSP_URLS[cameraId],
+                            },
+                        });
 
-                        // Monitor producer events
+                        const videoTrack = stream.getVideoTracks()[0];
+                        console.log(`Video track obtained for camera ${cameraId}:`, videoTrack);
+                        
+                        const producer = await transport.produce({ track: videoTrack });
+                        console.log(`Producer created for camera ${cameraId}:`, producer.id);
+
+                        producers.set(cameraId, producer);
+
                         producer.on('trace', (trace) => {
-                            console.log('Producer trace event:', trace);
+                            console.log(`Producer trace event for camera ${cameraId}:`, trace);
                         });
 
                     } catch (error) {
-                        console.error('Error producing video track:', error);
+                        console.error(`Error producing video track for camera ${cameraId}:`, error);
                     }
                 }
             } else if (data.event === 'producerTransportConnected') {
-                console.log('Transport connected:', data.status);
+                console.log(`Transport connected for camera ${data.cameraId}:`, data.status);
             } else {
                 console.log('Unknown event:', data);
             }
@@ -198,6 +209,18 @@ async function main() {
     ws.onclose = () => {
         console.log('WebSocket connection closed');
     };
+}
+
+async function initializeCameraStream(cameraId, rtspUrl, worker, device, ws) {
+    try {
+        console.log(`Initializing stream for camera ${cameraId} with URL: ${rtspUrl}`);
+        ws.send(JSON.stringify({ 
+            event: 'createProducerTransport',
+            cameraId: cameraId
+        }));
+    } catch (error) {
+        console.error(`Error initializing camera ${cameraId}:`, error);
+    }
 }
 
 main().catch((error) => {
