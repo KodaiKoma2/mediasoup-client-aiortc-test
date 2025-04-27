@@ -11,8 +11,8 @@ dotenv.config();
 
 // Get configuration from environment variables
 const RTSP_URLS = {
-    camera1: process.env.RTSP_URL_1 || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
-    camera2: process.env.RTSP_URL_2 || 'rtsp://KodaiKomatsu:Kodai1998@10.0.0.60/stream1',
+    camera1: process.env.RTSP_URL_1 ,
+    camera2: process.env.RTSP_URL_2 ,
     // Add more cameras as needed
 };
 

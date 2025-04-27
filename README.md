@@ -49,7 +49,7 @@ SFU_PORT=3000
 
 ### SFU Server
 ```env
-ANNOUNCED_IP=10.0.0.52
+ANNOUNCED_IP=10.0.0.52 # Clientから見たサーバーのIPアドレス
 PORT=3000
 # 複数ストリーム対応のための設定
 MAX_PRODUCERS=10  # 最大プロデューサー数
