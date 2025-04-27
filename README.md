@@ -1,4 +1,4 @@
-# MediaSoup SFU Server Test
+# MediaSoup SFU Test
 
 このプロジェクトは、MediaSoupを使用したWebRTCベースのビデオストリーミングシステムを実装したものです。複数のRTSPカメラフィードをソースとして、Webベースのコンシューマークライアントで表示する機能を提供します。
 
